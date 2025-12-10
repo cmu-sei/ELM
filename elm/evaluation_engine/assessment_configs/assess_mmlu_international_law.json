@@ -1,0 +1,11 @@
+{
+    "name": "mmlu_international_law",
+    "description": "MMLU assessment for the international law subject test split dataset.",
+    "version": "1.0",
+    "prompts": [
+        "prompt_mmlu_international_law_test_few_shot.json"
+    ],
+    "metrics": [
+        "MMLU_Accuracy"
+    ]
+}

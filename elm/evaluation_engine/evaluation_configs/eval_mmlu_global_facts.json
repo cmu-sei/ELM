@@ -1,0 +1,7 @@
+{
+    "outdir": "mmlu_global_facts",
+    "pipeline_type": "full",
+    "models": ["LLaMa 3.2 1B"],
+    "assessments": ["assess_mmlu_global_facts.json"],
+    "metrics": []
+}

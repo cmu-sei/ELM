@@ -1,0 +1,7 @@
+{
+    "outdir": "mmlu_logical_fallacies",
+    "pipeline_type": "full",
+    "models": ["LLaMa 3.2 1B"],
+    "assessments": ["assess_mmlu_logical_fallacies.json"],
+    "metrics": []
+}

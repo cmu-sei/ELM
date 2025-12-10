@@ -1,0 +1,11 @@
+{
+    "name": "mmlu_us_foreign_policy",
+    "description": "MMLU assessment for the US foreign policy subject.",
+    "version": "1.0",
+    "prompts": [
+        "prompt_mmlu_us_foreign_policy_test_few_shot.json"
+    ],
+    "metrics": [
+        "MMLU_Accuracy"
+    ]
+}

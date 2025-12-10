@@ -1,0 +1,11 @@
+{
+    "name": "mmlu_logical_fallacies",
+    "description": "MMLU assessment for the logical fallacies subject test split dataset.",
+    "version": "1.0",
+    "prompts": [
+        "prompt_mmlu_logical_fallacies_test_few_shot.json"
+    ],
+    "metrics": [
+        "MMLU_Accuracy"
+    ]
+}

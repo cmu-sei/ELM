@@ -1,0 +1,11 @@
+{
+    "name": "mmlu_global_facts",
+    "description": "MMLU assessment for the global facts subject test split dataset.",
+    "version": "1.0",
+    "prompts": [
+        "prompt_mmlu_global_facts_test_few_shot.json"
+    ],
+    "metrics": [
+        "MMLU_Accuracy"
+    ]
+}
