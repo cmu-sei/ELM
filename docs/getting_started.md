@@ -54,20 +54,23 @@ Download the model files to a directory of your choice. Make note of this direct
 hf download meta-llama/Llama-3.2-1B --local-dir ~/models/llama
 ```
 
-Modify the `Llama32_1B.py` languagemodel file in `llm-evaluation/elm/inference_engine/languagemodels/Llama32_1B.py` to specify the directory containing the newly downloaded model files. You will need to update these three lines:
-```python
-        self.weights_dir = (
-            "~/models/llama"
-        )
-        self.tokenizer_dir = (
-            "~/models/llama"
-        )
-        self.cache_dir = (
-            "~/models/llama"
-        )
+Create an environment configuration file in `llm-evaluation/elm/inference_engine/environment_configs/your_env_config.json` to specify the directory containing the newly downloaded model files.
+```json
+{
+    "name": "getting_started_environment",
+    "models": [
+        {
+            "model_name": "LLaMa 3.2 1B",
+            "model_family": "Llama",
+            "weights_dir": "~/models/llama",
+            "tokenizer_dir": "~/models/llama",
+            "cache_dir": "~/models/llama"
+        }
+    ]
+}
 ```
 
-With the model files downloaded and the corresponding languagemodel.py file updated with the proper directory locations, we can now proceed to setting up our evaluation pipeline.
+With the model files downloaded and the corresponding environment configuration file updated with the proper directory locations, we can now proceed to setting up our evaluation pipeline.
 
 ## Creating the Evaluation Pipeline
 
@@ -171,9 +174,14 @@ Evaluation configs are the entry point for running evaluations. They define what
 {
     "outdir": "output_directory_name",
     "pipeline_type": "full",
-    "models": ["Model Name 1", "Model Name 2"],
-    "assessments": ["assess_example.json"]
-
+    "environment_config": "env_config.json",
+    "models": [
+        {"name": "Model Name 1"},
+        {"name": "Model Name 2"}
+    ],
+    "assessments": [
+        {"config": "assess_example.json"}
+    ]
 }
 ```
 
@@ -187,13 +195,18 @@ Evaluation configs can also specify a `metrics_only` pipeline for calculating me
 
 Create a file `eval_getting_started.json` located at `elm/evaluation_engine/evaluation_configs/eval_getting_started.json`.
 
-This file will reference the assessment config and model file we setup in previous steps:
+This file will reference the environment config, assessment config and model we setup in previous steps:
 ```json
 {
     "outdir": "my_first_evaluation",
     "pipeline_type": "full",
-    "models": ["LLaMa 3.2 1B"],
-    "assessments": ["assess_getting_started.json"]
+    "environment_config": "env_getting_started.json",
+    "models": [
+        {"name": "LLaMa 3.2 1B"}
+    ],
+    "assessments": [
+        {"config": "assess_getting_started.json"}
+    ]
 }
 ```
 

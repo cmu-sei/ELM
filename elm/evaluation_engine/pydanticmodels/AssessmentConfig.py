@@ -22,8 +22,28 @@
 #
 # DM25-1265
 
-from .PromptConfig import PromptConfig
-from .InferenceConfig import InferenceConfig, InferenceSet
-from .EnvironmentConfig import EnvironmentConfig
+from pydantic import BaseModel, field_validator
+from typing import List, Optional
 
-__all__ = ["PromptConfig", "InferenceConfig", "InferenceSet", "EnvironmentConfig"]
+class AssessmentConfig(BaseModel):
+    name: str
+    description: Optional[str] = None
+    version: Optional[str] = None
+    prompts: List[str]
+    metrics: List[str]
+
+    config_path: Optional[str] = None
+
+    @field_validator("prompts")
+    @classmethod
+    def validate_prompts_not_empty(cls, prompts):
+        if not prompts:
+            raise ValueError("Assessment config must specify at least one prompt file")
+        return prompts
+    
+    @field_validator("metrics")
+    @classmethod
+    def validate_metrics_not_empty(cls, metrics):
+        if not metrics:
+            raise ValueError("Assessment must specify at least one metric")
+        return metrics

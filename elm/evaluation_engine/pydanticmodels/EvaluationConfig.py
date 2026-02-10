@@ -22,11 +22,19 @@
 #
 # DM25-1265
 
-from pydantic import BaseModel, validator, ConfigDict
-from typing import Optional, List, Union
+from pydantic import BaseModel, field_validator, ConfigDict
+from typing import Optional, List, Union, Dict, Any
+from elm.common import ModelSpec
 from .InferenceResultsConfig import InferenceResultsConfig
 import os
 import json
+
+
+class AssessmentSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config: str # Filename of assessment config
+    hyperparameters: Optional[Dict[str, Any]] = None
 
 
 class EvaluationConfig(BaseModel):
@@ -35,24 +43,28 @@ class EvaluationConfig(BaseModel):
     pipeline_type: str
     outdir: Optional[str] = None
 
-    # Full pipeline fields
-    models: Optional[List[str]] = None
-    assessments: Optional[List[str]] = None
+    # Global hyperparameters
+    hyperparameters: Optional[Dict[str, Any]] = None
 
-    # Metrics-only pipeline fields
+    # Full pipeline fields
+    environment_config: Optional[str] = None
+    models: Optional[List[ModelSpec]] = None
+    assessments: Optional[List[AssessmentSpec]] = None
     metrics: Optional[List[str]] = None
     inference_results: Optional[Union[List[str], InferenceResultsConfig]] = None
 
-    @validator("pipeline_type")
-    def validate_pipeline_type(cls, v):
-        valid_types = ["full", "metrics_only", "inference_only"]
-        if v not in valid_types:
-            raise ValueError(f"Invalid pipeline_type: {v}. Must be one of: {valid_types}")
-        return v
+    @field_validator("pipeline_type")
+    @classmethod
+    def validate_pipeline_type(cls, pipeline_type):
+        valid_types = ["full", "metrics_only"]
+        if pipeline_type not in valid_types:
+            raise ValueError(f"Invalid pipeline_type: {pipeline_type}. Must be one of: {valid_types}")
+        return pipeline_type
 
-    @validator("models")
-    def validate_models_field(cls, v, values):
-        pipeline_type = values.get("pipeline_type")
+    @field_validator("models")
+    @classmethod
+    def validate_models_field(cls, v, info):
+        pipeline_type = info.data.get("pipeline_type")
 
         if pipeline_type == "metrics_only" and v is not None:
             print("Warning: 'models' field will be ignored for metrics_only pipeline")
@@ -62,9 +74,10 @@ class EvaluationConfig(BaseModel):
 
         return v
 
-    @validator("assessments")
-    def validate_assessments_field(cls, v, values):
-        pipeline_type = values.get("pipeline_type")
+    @field_validator("assessments")
+    @classmethod
+    def validate_assessments_field(cls, v, info):
+        pipeline_type = info.data.get("pipeline_type")
 
         if pipeline_type == "metrics_only" and v is not None:
             print("Warning: 'assessments' field will be ignored for metrics_only pipeline")
@@ -74,9 +87,10 @@ class EvaluationConfig(BaseModel):
 
         return v
 
-    @validator("metrics")
-    def validate_metrics_field(cls, v, values):
-        pipeline_type = values.get("pipeline_type")
+    @field_validator("metrics")
+    @classmethod
+    def validate_metrics_field(cls, v, info):
+        pipeline_type = info.data.get("pipeline_type")
 
         if pipeline_type == "metrics_only":
             if not v or len(v) == 0:
@@ -88,9 +102,10 @@ class EvaluationConfig(BaseModel):
 
         return v
 
-    @validator("inference_results")
-    def validate_inference_results_field(cls, v, values):
-        pipeline_type = values.get("pipeline_type")
+    @field_validator("inference_results")
+    @classmethod
+    def validate_inference_results_field(cls, v, info):
+        pipeline_type = info.data.get("pipeline_type")
 
         if pipeline_type == "metrics_only":
             if v is None:

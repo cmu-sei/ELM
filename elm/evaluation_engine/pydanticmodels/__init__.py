@@ -22,7 +22,12 @@
 #
 # DM25-1265
 
-from .EvaluationConfig import EvaluationConfig
-from .InferenceResultsConfig import InferenceResultsConfig
+from .EvaluationConfig import EvaluationConfig, AssessmentSpec
+from .InferenceResultsConfig import InferenceResultsConfig, FilterConfig
+from .AssessmentConfig import AssessmentConfig
 
-__all__ = ["EvaluationConfig", "InferenceResultsConfig"]
+__all__ = ["EvaluationConfig",
+           "AssessmentSpec",
+           "InferenceResultsConfig",
+           "AssessmentConfig",
+           "FilterConfig"]

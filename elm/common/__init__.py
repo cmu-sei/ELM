@@ -22,8 +22,6 @@
 #
 # DM25-1265
 
-from .PromptConfig import PromptConfig
-from .InferenceConfig import InferenceConfig, InferenceSet
-from .EnvironmentConfig import EnvironmentConfig
+from .pydantic_models import ModelSpec
 
-__all__ = ["PromptConfig", "InferenceConfig", "InferenceSet", "EnvironmentConfig"]
+__all__ = ["ModelSpec"]

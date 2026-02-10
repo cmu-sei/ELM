@@ -24,9 +24,9 @@ its own license.
 
 DM25-1265
 
-# Pipeline Types
+## Pipeline Types
 
-## Full Pipeline
+### Full Pipeline
 
 Runs inference on specified models and prompts, then calculates metrics.
 
@@ -39,8 +39,20 @@ Runs inference on specified models and prompts, then calculates metrics.
 ```json
 {
     "pipeline_type": "full",
-    "models": ["LLaMa 3.2 1B", "LLaMa 3.2 3B"],
-    "assessments": ["assess_mmlu_simple_test.json"],
+    "environment_config": "test_env.json",
+    "models": [
+        {
+            "name": "LLaMa 3.2 1B",
+        },
+        {
+            "name": "LLaMa 3.2 3B"
+        }
+    ],
+    "assessments": [
+        {
+            "config": "assess_mmlu_simple_test.json",
+        }
+    ],
     "outdir": "my_evaluation"
 }
 ```
@@ -50,7 +62,7 @@ Runs inference on specified models and prompts, then calculates metrics.
 python EvaluationEngine.py -c my_eval.json
 ```
 
-## Metrics-Only Pipeline
+### Metrics-Only Pipeline
 
 Calculates metrics on existing inference results without re-running inference.
 
