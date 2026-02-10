@@ -1,7 +1,16 @@
 {
     "outdir": "mmlu_international_law",
+    "environment_config": "example_env_config.json",
     "pipeline_type": "full",
-    "models": ["LLaMa 3.2 1B"],
-    "assessments": ["assess_mmlu_international_law.json"],
+    "models": [
+        {
+            "name": "LLaMa 3.2 1B"
+        }
+    ],
+    "assessments": [
+        {
+            "config": "assess_mmlu_international_law.json"
+        }
+    ],
     "metrics": []
 }

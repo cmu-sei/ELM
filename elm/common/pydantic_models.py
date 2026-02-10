@@ -22,8 +22,24 @@
 #
 # DM25-1265
 
-from .PromptConfig import PromptConfig
-from .InferenceConfig import InferenceConfig, InferenceSet
-from .EnvironmentConfig import EnvironmentConfig
+from pydantic import BaseModel, ConfigDict
+from typing import Dict, Any, Optional
 
-__all__ = ["PromptConfig", "InferenceConfig", "InferenceSet", "EnvironmentConfig"]
+
+class ModelSpec(BaseModel):
+    """
+    Specification for a model with optional hyperparameter and quantization overrides.
+    
+    Used by both InferenceEngine and EvaluationEngine to specify which model to run
+    and with what configuration.
+    
+    Attributes:
+        name: The model name (must match available models)
+        hyperparameters: Optional dict of generation hyperparameters to override defaults
+        quantization_config: Optional dict of quantization settings for model loading
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    hyperparameters: Optional[Dict[str, Any]] = None
+    quantization_config: Optional[Dict[str, Any]] = None

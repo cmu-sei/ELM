@@ -31,11 +31,19 @@ class Model(LanguageModel):
 
     _weights_are_local = False
     
-    def __init__(self):
-        self._name = "OpenAI o4 Mini"
-        self.model = "o4-mini"
+    def __init__(self, specs):
 
-    def load(self):
+        if 'model_code' not in specs.keys():
+            error_message = (
+                f"model_code is a required input for this model family"
+                        )
+            self.raise_exception(error_message)
+
+        self._name = specs['model_name']
+        self.model = specs['model_code']
+        self.quantization_config_used = None
+
+    def load(self, quantization_config=None):
         self.client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
         )
@@ -47,16 +55,18 @@ class Model(LanguageModel):
         preface = f'Given this prompt history and context:\n<HISTORY>:\n{history_messages}\n<ENDHISTORY>\nRespond to the following query:\n'
         return preface
 
-    def ask(self, prompt, history=None):
+    def ask(self, prompt, history=None, hyperparameters=None):
         if history:
             preface = self.gen_history(history)
             prompt = preface + prompt
+
+        generation_config = {}
         
         response = self.client.responses.create(
             model=self.model,
             input=prompt
         )
-        return response.output_text
+        return response.output_text, generation_config
 
     def delete(self):
         return True

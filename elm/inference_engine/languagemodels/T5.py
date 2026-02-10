@@ -24,9 +24,9 @@
 
 from .LanguageModel import LanguageModel
 from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig
+    GenerationConfig,
+    T5Tokenizer,
+    T5ForConditionalGeneration
 )
 from gc import collect
 from torch.cuda import empty_cache, is_available
@@ -35,19 +35,24 @@ from torch.backends import mps
 
 class Model(LanguageModel):
 
-    def __init__(self):
+    def __init__(self, specs):
         self.tokenizer = None
         self.model = None
-        self._name = "LLaMa 3.2 1B"
-        self.weights_dir = (
-            "/path/to/your/weights/file"
-        )
-        self.tokenizer_dir = (
-            "/path/to/your/tokenizer/file"
-        )
-        self.cache_dir = (
-            "/path/to/your/cache"
-        )
+        self.quantization_config_used = None
+
+        if 'weights_dir' not in specs.keys():
+            error_message = (
+                f"weights_dir is a required input for this model family"
+                        )
+            self.raise_exception(error_message)
+        if 'tokenizer_dir' not in specs.keys():
+            error_message = (
+                f"tokenizer_dir is a required input for this model family"
+                        )
+
+        self._name = specs['model_name']
+        self.weights_dir = specs['weights_dir']
+        self.tokenizer_dir = specs['tokenizer_dir']
 
         if is_available():
             self.device = "cuda"
@@ -56,19 +61,9 @@ class Model(LanguageModel):
         else:
             self.device = "cpu"
 
-    def load(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.tokenizer_dir,
-            use_fast=True
-        )
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.weights_dir,
-            quantization_config=bnb_config
-        )
-
-        model.eval()
-        self.model = model
+    def load(self, quantization_config=None):
+        self.model = T5ForConditionalGeneration.from_pretrained(self.weights_dir)
+        self.tokenizer = T5Tokenizer.from_pretrained(self.tokenizer_dir)
 
     def gen_history(self, history):
         history_messages = ""
@@ -83,7 +78,32 @@ class Model(LanguageModel):
         )
         return preface
 
-    def ask(self, prompt, history=None, max_new_tokens=256):
+    def ask(self, prompt, history=None, hyperparameters=None):
+        generation_config = GenerationConfig(
+            max_new_tokens=256,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.7,
+            top_k=50
+        )
+        # Merge defaults with user provided hyperparameters
+        if hyperparameters:
+            # Validate user provided valid parameter names
+            valid_params = set(GenerationConfig().to_dict().keys())
+            invalid_params = set(hyperparameters.keys()) - valid_params
+            if invalid_params:
+                invalid_list = ", ".join(f"'{p}'" for p in sorted(invalid_params))
+                raise TypeError(
+                    f"Invalid hyperparameter(s) for model '{self._name}': {invalid_list}"
+                )
+            # Update generation config with user provided hyperparams
+            try:
+                generation_config.update(**hyperparameters)
+            except (ValueError) as e:
+                raise ValueError(
+                    f"Invalid hyperparameters for model `{self._name}`: {e}"
+                ) from e
+
         if history:
             preface = self.gen_history(history)
             prompt = preface + prompt
@@ -92,15 +112,11 @@ class Model(LanguageModel):
         input_length = inputs.input_ids.shape[1]
         outputs = self.model.generate(
             **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.7,
-            top_k=50,
+            generation_config=generation_config,
             return_dict_in_generate=True,
         )
         token = outputs.sequences[0, input_length:]
-        return self.tokenizer.decode(token, skip_special_tokens=True)
+        return self.tokenizer.decode(token, skip_special_tokens=True), generation_config.to_dict()
 
     @property
     def name(self):

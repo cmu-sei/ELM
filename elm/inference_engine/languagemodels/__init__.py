@@ -22,14 +22,12 @@
 #
 # DM25-1265
 
-from . import Llama32_1B
-from . import Llama31_8B_Instruct
-from . import Llama32_3B
-from . import OpenAI_o4_Mini
+from . import Llama
+from . import T5
+from . import OpenAI
 
 __all__ = [
-    "Llama32_1B",
-    "Llama31_8B_Instruct",
-    "Llama32_3B",
-    "OpenAI_o4_Mini"
+    "Llama",
+    "T5",
+    "OpenAI"
 ]

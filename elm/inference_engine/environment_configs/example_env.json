@@ -1,0 +1,13 @@
+{
+    "name": "example_env",
+    "models": 
+        [ 
+            {
+                "model_name": "LLaMa 3.2 1B",
+                "model_family": "Llama",
+                "weights_dir": "path/to/weights_dir",
+                "tokenizer_dir": "/path/to/tokenizer_dir",
+                "cache_dir": "/path/to/cache_dir"
+            }
+        ]
+}

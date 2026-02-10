@@ -48,6 +48,8 @@ class Inference_Log:
             "start_time": datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
             "model_name": None,
             "prompt_config": None,
+            "generation_config": None,
+            "quantization_config": None,
             "load_time": None,
             "inference_time": None,
             "inference_results": None,
@@ -103,7 +105,9 @@ class Inference_Engine:
     # System Control, Logging, and Error Handling #
     # ------------------------------------------- #
 
-    def __init__(self, logdir="./logs", promptdir=None, metrics_interval=1.0):
+    def __init__(
+        self, logdir="./logs", promptdir=None, envdir=None, metrics_interval=1.0
+    ):
         self.init_time = datetime.now()
         self.logdir = logdir
         self.bypass_logging = False
@@ -112,22 +116,23 @@ class Inference_Engine:
         )
 
         # Loads all available models+names into a dictionary
-        self.available_models = {}
+        # NPS edit this section to make model families
+        self.available_model_families = []
         klass_list = languagemodels.__all__
         for klass in klass_list:
-            module = import_module("elm.inference_engine.languagemodels." + klass)
-            model = module.Model()
-            self.available_models[model.name] = model
-
-        # Do not allow usage of engine if there are 0 models available
-        if len(self.available_models) < 1:
-            error_message = "Inference engine could not start - no models were successfully loaded."
-            self.raise_exception(error_message)
+            self.available_model_families.append(klass)
+        self.available_models = {}
 
         # Set prompts directory - use override if provided, otherwise default
-        self.promptdir = promptdir if promptdir else self._get_default_prompts_directory()
+        self.promptdir = (
+            promptdir if promptdir else self._get_default_prompts_directory()
+        )
         self._validate_prompts_directory()
         self.available_prompts = {}
+
+        # Set environment config directory - use override if provided, otherwise default
+        self.envdir = envdir if envdir else self._get_default_env_directory()
+        self._validate_env_directory()
 
         # Models and prompts selected for evaluation
         self.model_selection = []
@@ -373,12 +378,12 @@ class Inference_Engine:
     def load_prompts_from_file(self, prompt_filename, exit_on_fail=False):
         file_prompts = []
 
-        if not prompt_filename.endswith('.json'):
+        if not prompt_filename.endswith(".json"):
             error_message = f"Prompt file '{prompt_filename}' is not a .json file. Only .json files are supported."
             self._handle_error(error_message, exit_on_fail)
             return file_prompts
 
-        try: 
+        try:
             # Resolve path to configured prompts directory
             resolved_path = self._resolve_prompt_file(prompt_filename)
             self.log_event("SYSTEM", f"Loading prompts from: {resolved_path}")
@@ -416,7 +421,7 @@ class Inference_Engine:
         try:
             for root, dirs, files in os.walk(target_dir):
                 for filename in files:
-                    if filename.endswith('.json'):
+                    if filename.endswith(".json"):
                         # Get relative path from the base prompts directory
                         file_path = os.path.join(root, filename)
                         relative_path = os.path.relpath(file_path, target_dir)
@@ -449,17 +454,49 @@ class Inference_Engine:
     # Model Loading #
     # ------------- #
 
+    def load_env_from_file(self, env_filename, exit_on_fail=False):
+
+        env_config = None
+
+        if not env_filename.endswith(".json"):
+            error_message = f"Env file '{env_filename}' is not a .json file. Only .json files are supported."
+            self._handle_error(error_message, exit_on_fail)
+
+        try:
+            # Resolve path to configured prompts directory
+            resolved_path = self._resolve_env_file(env_filename)
+            self.log_event("SYSTEM", f"Loading environment from: {resolved_path}")
+            with open(resolved_path, "r") as file:
+                file_data = json.load(file)
+                # Files must contain properly formatted EnvironmentConfigs ->
+                # see pydanticmodels/EnvironmentConfig.py
+                try:
+                    env_config = pydanticmodels.EnvironmentConfig(**file_data)
+                except ValidationError as e:
+                    error_message = f"Validation error for {resolved_path}: {e}"
+                    self._handle_error(error_message, exit_on_fail)
+
+        except FileNotFoundError as e:
+            error_message = f"Could not locate prompt file: {e}"
+            self._handle_error(error_message, exit_on_fail)
+        except json.JSONDecodeError as e:
+            error_message = f"JSON decode error in {env_filename}: {e}"
+            self._handle_error(error_message, exit_on_fail)
+
+        return env_config
+
     # Loads the model into memory based on model_name
-    def load_selected_model(self, model_name):
+    def load_selected_model(self, model_name, quantization_config=None):
         if model_name in self.available_models:
             start_time = perf_counter()
             self.log_event("EVENT", f"Loading model {model_name}")
-            
+
             model = self.available_models[model_name]
             if model._weights_are_local:
                 self.start_metrics_collection(f"Model Load - {model_name}")
 
-            model.load()
+            # Pass quant config overrides through. Model code decides whether to use or ignore
+            model.load(quantization_config=quantization_config)
             self.loaded_model = model
             load_time = perf_counter() - start_time
             self.log_event(
@@ -520,7 +557,7 @@ class Inference_Engine:
     # ---------------- #
 
     # Use one loaded model to execute inference using the text from one prompt
-    def execute_inference(self, model, prompt):
+    def execute_inference(self, model, prompt, hyperparameters=None):
         start_time = perf_counter()
         self.log_event(
             "EVENT", f"Executing inference with {model._name} and {prompt.name}."
@@ -529,25 +566,31 @@ class Inference_Engine:
             self.start_metrics_collection(
                 f"Model Inference - {model._name} + {prompt.name}"
             )
-        answer = model.ask(prompt=prompt.text)
+        answer, generation_config = model.ask(prompt=prompt.text, hyperparameters=hyperparameters)
         inference_time = perf_counter() - start_time
         self.log_event(
             "EVENT",
             f"Inference with {model._name} finished after {inference_time} seconds.",
         )
         inference_metrics = self.stop_metrics_collection()
-        return answer, inference_time, inference_metrics
+        return answer, generation_config, inference_time, inference_metrics
 
     # Performs inference using all selected models and all selected prompts
     def execute_inference_pipeline(self, output_dir="./results"):
         results_files = []
 
-        for model_name in self.model_selection:
+        for model_spec in self.model_selection:
+            model_name = model_spec["name"]
+            hyperparameters = model_spec.get("hyperparameters", {})
+            quant_config = model_spec.get("quantization_config")
+
             # Check to make sure model successful loads
             self.print_step(f"Loading {model_name}...")
-            load_time = self.load_selected_model(model_name)
+            load_time = self.load_selected_model(model_name, quant_config)
             executed_prompts = 0
             if self.loaded_model and load_time:
+                used_quant_config = self.loaded_model.quantization_config_used
+
                 for prompt in self.prompt_selection:
 
                     # Create a new Inference Log for this model/prompt combination and update model name
@@ -573,13 +616,15 @@ class Inference_Engine:
                     self.print_step(
                         f"Executing inference: '{model_name}' with '{prompt}'..."
                     )
-                    result, inference_time, inference_metrics = self.execute_inference(
-                        self.loaded_model, prompt_config
+                    result, generation_config, inference_time, inference_metrics = self.execute_inference(
+                        self.loaded_model, prompt_config, hyperparameters
                     )
 
                     # Log inference results
                     inference_log.update_log(
                         {
+                            "generation_config": generation_config,
+                            "quantization_config": used_quant_config,
                             "inference_results": result,
                             "inference_time": inference_time,
                             "hardware_metrics": {"inference": inference_metrics},
@@ -628,23 +673,69 @@ class Inference_Engine:
                 if isinstance(file_data, list):
                     for config in file_data:
                         inference_config = pydanticmodels.InferenceConfig(**config)
+                        global_hyperparams = inference_config.hyperparameters or {} # add globals if exist, otherwise empty dict
                         output_dir = inference_config.output_directory
                         inference_sets = inference_config.inference_sets
+                        environment_config_path = inference_config.environment_config
+
+                        # Load environment config file, including available models
+                        loaded_env_config = self.load_env_from_file(
+                            environment_config_path
+                        )
 
                         self.print_step("Processing config inference sets...")
+
+                        # The name in the environment config file for the model family must
+                        # exactly match the class name
+                        for model in loaded_env_config.models:
+
+                            if (
+                                "model_family" not in model.keys()
+                                or "model_name" not in model.keys()
+                            ):
+                                error_message = f"model_name and model_family are required for each model"
+                                self.raise_exception(error_message)
+
+                            klass = model["model_family"]
+                            module = import_module(
+                                "elm.inference_engine.languagemodels." + klass
+                            )
+                            available_model = module.Model(model)
+                            self.available_models[model["model_name"]] = available_model
+
                         for inference_set in inference_sets:
-                            model_selection = inference_set["models"]
-                            prompt_files = inference_set["prompts"]
+                            # Use dictionary unpacking so set-scoped params override global-scope params
+                            inference_set_hyperparams = {
+                                **global_hyperparams,
+                                **(inference_set.hyperparameters or {})
+                            }
 
-                            for model in model_selection:
-                                if model in self.available_models:
-                                    self.model_selection.append(model)
-                                else:
-                                    error_message = f"Model '{model}' specified in '{config_file}' does not match any available models."
+
+                            for model_spec in inference_set.models:
+                                model_name = model_spec.name
+                                # Use dictionary unpacking so model-scoped params override set-scoped params
+                                model_hyperparams = {
+                                    **inference_set_hyperparams,
+                                    **(model_spec.hyperparameters or {})
+                                }
+                                quantization_config = model_spec.quantization_config
+
+                                # Validate model exists
+                                if model_name not in self.available_models:
+                                    error_message = f"Model '{model_name}' specified in '{config_file}' does not match any available models."
                                     self.raise_exception(error_message)
-                            self.print_step(f"Models selected: {self.model_selection}")
 
-                            for prompt_file in prompt_files:
+                                # Store model spec
+                                self.model_selection.append({
+                                    "name": model_name,
+                                    "hyperparameters": model_hyperparams,
+                                    "quantization_config": quantization_config
+                                })
+
+                            self.print_step(f"Models selected: {self.model_selection}") 
+
+                            # Load prompts
+                            for prompt_file in inference_set.prompts:
                                 loaded_prompt_configs = self.load_prompts_from_file(
                                     prompt_file, exit_on_fail=True
                                 )
@@ -656,6 +747,14 @@ class Inference_Engine:
                             self.check_for_loaded_prompts()
                             self.execute_inference_pipeline(output_dir)
                             self.reset_inference_config()
+                else:
+                    error_message = (
+                        f"Invalid config file format: {config_file}\n"
+                        f"Expected: A JSON array (list) containing configuration object(s)\n"
+                        f"Got: {type(file_data).__name__}\n\n"
+                        f"Note: The config must be wrapped in square brackets [ ] even for a single configuration."
+                    )
+                    self.raise_exception(error_message)
 
             except ValidationError as e:
                 error_message = f"File failed pydantic validation:\n{e}"
@@ -703,6 +802,11 @@ class Inference_Engine:
         inference_engine_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(inference_engine_dir, "prompts")
 
+    def _get_default_env_directory(self):
+        """Get the default inference environment configs directory."""
+        inference_engine_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(inference_engine_dir, "environment_configs")
+
     def _validate_prompts_directory(self):
         """Ensure the prompts directory exists and is accessible."""
         if not os.path.exists(self.promptdir):
@@ -711,26 +815,39 @@ class Inference_Engine:
                 f"Default location: {self._get_default_prompts_directory()}"
             )
             self.raise_exception(error_message)
-        
+
         if not os.path.isdir(self.promptdir):
             error_message = f"Prompts path is not a directory: {self.promptdir}"
+            self.raise_exception(error_message)
+
+    def _validate_env_directory(self):
+        """Ensure the environment configs directory exists and is accessible."""
+        if not os.path.exists(self.envdir):
+            error_message = (
+                f"Environment config directory not found: {self.envdir}\n"
+                f"Default location: {self._get_default_env_directory()}"
+            )
+            self.raise_exception(error_message)
+
+        if not os.path.isdir(self.envdir):
+            error_message = f"Environment config path is not a directory: {self.envdir}"
             self.raise_exception(error_message)
 
     def _resolve_prompt_file(self, prompt_filename):
         """
         Resolve a prompt filename to its absolute path in the configured prompts directory.
         Supports both flat files and subfolder organization.
-        
+
         Args:
             prompt_filename: Filename or relative path (e.g., "test.json" or "benchmarks/mmlu/sociology.json")
-        
+
         Returns:
             Absolute path to the prompt file
         """
         # Clean the filename to handle any path separators
-        clean_filename = prompt_filename.lstrip(os.sep).lstrip('/')
+        clean_filename = prompt_filename.lstrip(os.sep).lstrip("/")
         prompt_path = os.path.join(self.promptdir, clean_filename)
-        
+
         if not os.path.exists(prompt_path):
             error_message = (
                 f"Prompt file not found: {prompt_path}\n"
@@ -738,8 +855,34 @@ class Inference_Engine:
                 f"In directory: {self.promptdir}"
             )
             raise FileNotFoundError(error_message)
-        
+
         return prompt_path
+
+    def _resolve_env_file(self, env_filename):
+        """
+        Resolve an env config filename to its absolute path in the configured env configs directory.
+        Supports both flat files and subfolder organization.
+
+        Args:
+            env_filename: Filename or relative path (e.g., "test.json" or "benchmarks/mmlu/sociology.json")
+
+        Returns:
+            Absolute path to the env config file
+        """
+        # Clean the filename to handle any path separators
+        clean_filename = env_filename.lstrip(os.sep).lstrip("/")
+        env_path = os.path.join(self.envdir, clean_filename)
+
+        if not os.path.exists(env_path):
+            error_message = (
+                f"Environment config file not found: {env_path}\n"
+                f"Looking for: {clean_filename}\n"
+                f"In directory: {self.envdir}"
+            )
+            raise FileNotFoundError(error_message)
+
+        return env_path
+
 
 if __name__ == "__main__":
 

@@ -1,0 +1,18 @@
+[
+    {
+        "output_directory": "example_outdir",
+        "environment_config": "example_env.json",
+        "inference_sets": [
+            {
+                "models": [
+                    {
+                        "name": "LLaMa 3.2 1B"
+                    }
+                ],
+                "prompts": [
+                    "example_prompt.json"
+                ]
+            }
+        ]
+    }
+]

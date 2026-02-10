@@ -34,14 +34,15 @@ from pathlib import Path
 from elm.inference_engine.Inference_Engine import Inference_Engine
 from elm.evaluation_engine import pydanticmodels
 from elm.evaluation_engine.pydanticmodels.InferenceResultsConfig import InferenceResultsConfig
-import metrics
+import elm.evaluation_engine.metrics as metrics
 
 
 class Evaluation_Engine:
     def __init__(self, 
                  evaluation_configs_dir=None, 
                  assessment_configs_dir=None, 
-                 results_dir=None):
+                 results_dir=None,
+                 promptdir=None):
         self.init_time = datetime.now()
 
         # Set up directory paths with defaults or overrides if provided
@@ -49,20 +50,17 @@ class Evaluation_Engine:
 
         # Available components
         self.available_metrics = {}
-        self.available_models = []
+        self.available_models = {}
 
         # Current evaluation state
         self.evaluation_config = None
+        self.promptdir = promptdir
 
         # Initialize available metrics
         self._get_available_metrics()
 
-        # Get available models from inference engine
-        self._get_available_models()
-
         print(f"Evaluation Engine initialized at {self.init_time}")
         print(f"Available metrics: {list(self.available_metrics.keys())}")
-        print(f"Available models: {self.available_models}")
 
     # ------------------------------------------- #
     #     Public Interface / Callable Methods     #
@@ -83,7 +81,7 @@ class Evaluation_Engine:
             self.run_id = f"eval_{run_timestamp}"
 
             # Resolve base output directory path
-            configured_outdir = self.evaluation_config.get("outdir", self.results_dir)
+            configured_outdir = self.evaluation_config.outdir or self.results_dir
             configured_outdir = os.path.expandvars(os.path.expanduser(configured_outdir))
             base_output_dir = Path(configured_outdir)
             if not base_output_dir.is_absolute():
@@ -94,7 +92,7 @@ class Evaluation_Engine:
             output_dir = base_output_dir / f"run_{self.run_id}"
 
             # Execute specified pipeline
-            pipeline_type = self.evaluation_config["pipeline_type"]
+            pipeline_type = self.evaluation_config.pipeline_type
             print(f"Executing {pipeline_type} pipeline...")
 
             if pipeline_type == "full":
@@ -133,8 +131,7 @@ class Evaluation_Engine:
 
             # Validate using Pydantic model
             try:
-                validated_config = pydanticmodels.EvaluationConfig(**config_data)
-                self.evaluation_config = validated_config.export()
+                self.evaluation_config = pydanticmodels.EvaluationConfig(**config_data)
             except ValidationError as e:
                 raise ValueError(f"Invalid evaluation config: {e}")
 
@@ -148,22 +145,21 @@ class Evaluation_Engine:
 
     def load_assessment_config(self, filename):
         """
-        Load individual assessment configuration file.
-        TODO: Add Pydantic validation for assessment config
+        Load and validate assessment configuration file using Pydantic.
         """
         try:
             # Resolve config file path
             resolved_path = self._resolve_config_filepath(filename, self.assessment_configs_dir)
             with open(resolved_path, "r") as file:
-                assessment_config = json.load(file)
+                config_data = json.load(file)
 
-            assessment_config["config_path"] = resolved_path
-
-            # TODO: Add Pydantic validation
-            # assessment_config = pydanticmodels.AssessmentConfig(**assessment_config)
-
-            print(f"Loaded assessment config: {resolved_path}")
-            return assessment_config
+            try:
+                config_data['config_path'] = resolved_path
+                assessment_config = pydanticmodels.AssessmentConfig(**config_data)
+                print(f"Loaded assessment config: {resolved_path}")
+                return assessment_config
+            except ValidationError as e:
+                raise ValueError(f"Invalid assessment config in {filename}: {e}")
 
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Assessment config not found: {str(e)}")
@@ -181,26 +177,26 @@ class Evaluation_Engine:
         print("Starting full evaluation pipeline...")
 
         evaluation_report = self._create_evaluation_report_structure(
-            total_models=len(self.evaluation_config["models"]),
-            total_assessments=len(self.evaluation_config["assessments"]),
+            total_models=len(self.evaluation_config.models),
+            total_assessments=len(self.evaluation_config.assessments),
         )
 
-        # Process each model
-        for model_name in self.evaluation_config["models"]:
-            print(f"\nProcessing model: {model_name}")
+        # Process each model (ModelSpec object)
+        for model_spec in self.evaluation_config.models:
+            print(f"\nProcessing model: {model_spec.name}")
 
-            model_result = {"model_name": model_name, "assessments": []}
+            model_result = {"model_name": model_spec.name, "assessments": []}
 
-            # Process each assessment for this model
-            for assessment_filename in self.evaluation_config["assessments"]:
+            # Process each assessment (AssessmentSpec object) for the current model
+            for assessment_spec in self.evaluation_config.assessments:
                 assessment_start_time = perf_counter()
-                assessment_config = self.load_assessment_config(assessment_filename)
+                assessment_config = self.load_assessment_config(assessment_spec.config)
 
-                # Execute inference for this specific model + assessment combination
+                # Execute inference for model + assessment pairing, with optional overrides
                 inference_results = self.execute_inference_for_assessment(
-                    model=model_name,
-                    assessment_config=assessment_config,
-                    output_dir=Path(output_dir) / model_name / assessment_config["name"],
+                    model_spec=model_spec,
+                    assessment_spec=assessment_spec,
+                    output_dir=Path(output_dir) / model_spec.name / assessment_config.name,
                 )
                 # Process results and calculate metrics
                 assessment_result = self.process_assessment_results(
@@ -247,24 +243,66 @@ class Evaluation_Engine:
     #                  Processing                 #
     # ------------------------------------------- #
 
-    def execute_inference_for_assessment(self, model, assessment_config, output_dir):
+    def execute_inference_for_assessment(self, model_spec, assessment_spec, output_dir):
         """
         Execute inference for a specific model and assessment using the inference engine.
-        Returns list of inference result file paths.
+
+        Args:
+            model_spec: ModelSpec object with name, optional hyperparameters, optional quantization_config
+            assessment_spec: AssessmentSpec object with config filename and optional hyperparameters
+            output_dir: Output directory for results
+
+        Returns: 
+            List of inference result file paths.
         """
+        # Load asssesment config
+        assessment_config = self.load_assessment_config(assessment_spec.config)
+
         print(
-            f"Executing inference for {model} on assessment {assessment_config['name']}"
+            f"Executing inference for {model_spec.name} on assessment {assessment_config.name}"
         )
+
+        # Merge hyperparameters: global < assessment < model
+        global_hyperparams = self.evaluation_config.hyperparameters or {}
+        assessment_hyperparams = assessment_spec.hyperparameters or {}
+        model_hyperparams = model_spec.hyperparameters or {}
+
+        merged_hyperparams = {
+            **global_hyperparams,
+            **assessment_hyperparams,
+            **model_hyperparams
+        }
 
         # Create inference engine instance
         logdir = Path(output_dir) / "inference_logs"
-        inference_engine = Inference_Engine(logdir=str(logdir))
+        inference_engine = Inference_Engine(logdir=str(logdir), promptdir=self.promptdir)
 
-        # Set model selection
-        inference_engine.model_selection = [model]
+        environment_config = inference_engine.load_env_from_file(self.evaluation_config.environment_config)
+        for avail_model in environment_config.models:
+
+            if (
+                "model_family" not in avail_model.keys()
+                or "model_name" not in avail_model.keys()
+            ):
+                error_message = f"model_name and model_family are required for each model"
+                self.raise_exception(error_message)
+
+            klass = avail_model["model_family"]
+            module = import_module(
+                 "elm.inference_engine.languagemodels." + klass
+            )
+            available_model = module.Model(avail_model)
+            inference_engine.available_models[avail_model["model_name"]] = available_model
+
+        # Set model selection with merged hyperparameters
+        inference_engine.model_selection = [{
+            "name": model_spec.name,
+            "hyperparameters": merged_hyperparams,
+            "quantization_config": model_spec.quantization_config
+        }]
 
         # Load prompts from assessment config
-        for prompt_file in assessment_config["prompts"]:
+        for prompt_file in assessment_config.prompts:
             print(f"Loading prompts from: {prompt_file}")
             loaded_prompts = inference_engine.load_prompts_from_file(
                 prompt_file, exit_on_fail=True
@@ -284,7 +322,14 @@ class Evaluation_Engine:
     def process_assessment_results(self, assessment_config, inference_results, start_time=None):
         """
         Process inference results for a single assessment.
-        Returns assessment result structure for evaluation report.
+
+        Args:
+            assessment_config: AssessmentConfig Pydantic object
+            inference_results: List of result file paths
+            start_time: Optional start time for execution time calculation
+        
+        Returns:
+            Assessment result structure for evaluation report
         """
         # Load inference results into memory
         loaded_results = self.load_inference_results(inference_results)
@@ -299,8 +344,8 @@ class Evaluation_Engine:
 
         # Build assessment result structure
         assessment_result = {
-            "name": assessment_config["name"],
-            "config": assessment_config.get("config_path", "unknown"),
+            "name": assessment_config.name,
+            "config": getattr(assessment_config, 'config_path', 'unknown'),
             "execution_time": execution_time,
             "total_prompts": len(prompt_results),
             "metric_summaries": {
@@ -315,13 +360,19 @@ class Evaluation_Engine:
     def calculate_metrics(self, assessment_config, inference_results):
         """
         Calculate all metrics for an assessment.
-        Returns dictionary of metric results.
+
+        Args:
+            assessment_config: AssessmentConfig Pydantic object
+            inference_results: Loaded inference results
+        
+        Returns:
+            Dictionary of metric results
         """
-        print(f"Calculating metrics for assessment: {assessment_config['name']}")
+        print(f"Calculating metrics for assessment: {assessment_config.name}")
 
         metric_results = {}
 
-        for metric_name in assessment_config["metrics"]:
+        for metric_name in assessment_config.metrics:
             if metric_name not in self.available_metrics:
                 print(f"Warning: Metric '{metric_name}' not available. Skipping.")
                 continue
@@ -332,7 +383,6 @@ class Evaluation_Engine:
                 metric = self.available_metrics[metric_name]
                 result = metric.compute(inference_results)
                 metric_results[metric_name] = result
-
                 print(f"{metric_name}: completed")
 
             except Exception as e:
@@ -354,7 +404,7 @@ class Evaluation_Engine:
         Load inference results based on the configuration format.
         Returns loaded inference results.
         """
-        inference_results_config = self.evaluation_config["inference_results"]
+        inference_results_config = self.evaluation_config.inference_results
 
         if isinstance(inference_results_config, list):
             # Direct file path array format
@@ -381,7 +431,6 @@ class Evaluation_Engine:
                     inference_results.append(result_data)
             except Exception as e:
                 print(f"Error loading inference result {file_path}: {e}")
-                # TODO: Add proper error handling, return helpful message to user, probably don't want to fail outright as this could be on the tail end of a long batch
 
         return inference_results
 
@@ -457,7 +506,7 @@ class Evaluation_Engine:
         start_time = perf_counter()
 
         # Get metrics to calculate from evaluation config
-        metrics_to_calculate = self.evaluation_config.get("metrics", [])
+        metrics_to_calculate = self.evaluation_config.metrics or []
         if not metrics_to_calculate:
             raise ValueError("No metrics specified in evaluation config for metrics_only pipeline")
 
@@ -550,7 +599,7 @@ class Evaluation_Engine:
             "run_id": getattr(self, "run_id", "unknown"),
             "evaluation_config": getattr(self, "config_file_path", "unknown"),
             "timestamp": datetime.now().isoformat(),
-            "pipeline_type": self.evaluation_config["pipeline_type"],
+            "pipeline_type": self.evaluation_config.pipeline_type,
             "total_models": total_models,
             "total_assessments": total_assessments,
         }
@@ -578,7 +627,6 @@ class Evaluation_Engine:
             if "gt_text" in prompt_config and prompt_config["gt_text"] is not None:
                 prompt_result["gt_text"] = prompt_config["gt_text"]
 
-            #TODO: implement `gt_file` handling or remove this entirely
             if "gt_file" in prompt_config and prompt_config["gt_file"] is not None:
                 prompt_result["gt_file"] = prompt_config["gt_file"]
 
@@ -615,14 +663,6 @@ class Evaluation_Engine:
         except Exception as e:
             print(f"Warning: Could not enumerate metrics - {e}")
 
-    def _get_available_models(self):
-        try:
-            inference_engine = Inference_Engine()
-            self.available_models = list(inference_engine.available_models.keys())
-        except Exception as e:
-            print(f"Error getting available models: {e}")
-            # TODO: Add proper error handling
-            self.available_models = []
 
     def _setup_directories(self, evaluation_configs_dir, assessment_configs_dir, results_dir):
         # Get directory where engine is located

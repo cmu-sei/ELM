@@ -31,20 +31,24 @@ Complete reference for all configuration files in the evaluation framework.
 ## Table of Contents
 
 1. [Configuration Hierarchy](#configuration-hierarchy)
-2. [Evaluation Configs](#evaluation-configs)
-3. [Assessment Configs](#assessment-configs)
-4. [Prompt Configs](#prompt-configs)
-5. [Path Resolution](#path-resolution)
+2. [Environment Configs](#environment-configs)
+3. [Evaluation Configs](#evaluation-configs)
+4. [Assessment Configs](#assessment-configs)
+5. [Prompt Configs](#prompt-configs)
+6. [Path Resolution](#path-resolution)
 
 ---
 
 ## Configuration Hierarchy
 
-The evaluation framework uses three levels of configuration:
+The evaluation framework uses the following configuration files:
 
 ```
+Environment Config
+├── Defines: Available models and paths to local weights
+│
 Evaluation Config (Top Level)
-├── Specifies: pipeline type, models, assessments, metrics, output directory
+├── Specifies: pipeline type, models, assessments, metrics, output directory, hyperparameter overrides (optional), quantization config overrides (optional)
 ├── References: Assessment configs (for full pipeline) or inference results (for metrics_only)
 │
 └─> Assessment Config (Mid Level)
@@ -56,6 +60,44 @@ Evaluation Config (Top Level)
 ```
 
 **Key principle:** Each level references the next level by filename, and the engine resolves paths automatically.
+
+---
+
+## Environment Configs
+
+Environment configs define available models and their file system locations. Required for both inference and evaluation engines.
+
+### Location
+- Default directory: `elm/inference_engine/environment_configs/`
+- Specified in inference/evaluation configs via `environment_config` field
+
+### Schema
+```json
+{
+    "name": "test_environment",
+    "models": [
+        {
+            "model_name": "LLaMa 3.2 1B",
+            "model_family": "Llama",
+            "weights_dir": "/path/to/weights_dir",
+            "tokenizer_dir": "/path/to/tokenizer_dir",
+            "cache_dir": "/path/to/cache_dir"
+        },
+        {
+            "model_name": "OpenAI o4 Mini",
+            "model_family": "OpenAI",
+            "model_code": "o4-mini"
+        }
+    ]
+}
+```
+
+**Required Fields:**
+- `name`: Environment identifier
+- `models`: Array of model specifications
+  - `model_name`: Unique name referenced in configs
+  - `model_family`: Model class name (must match file in `languagemodels/`)
+  - `model_code`: Unique identifier for API-based models
 
 ---
 
@@ -74,17 +116,45 @@ Evaluation configs are the entry point for running evaluations. They define what
 ```json
 {
     "pipeline_type": "full",
-    "models": ["Model Name 1", "Model Name 2"],
-    "assessments": ["assess_example.json"],
+    "hyperparameters": {
+        "temperature": 0.7,
+        "max_new_tokens": 256,
+        "top_p": 0.9
+    },
+    "models": [
+        {
+            "name": "Example Model",
+            "hyperparameters": {
+                "temperature": 0.9
+            }
+        }
+    ],
+    "assessments": [
+        {
+            "config": "example_assessment.json",
+            "hyperparameters": {
+                "max_new_tokens": 512
+            }
+        }
+    ],
     "outdir": "output_directory_name"
 }
 ```
 
 **Fields:**
 - `pipeline_type` (required): Must be `"full"`
-- `models` (required): Array of model names (must match model's `name` property)
-- `assessments` (required): Array of assessment config filenames
+- `environment_config` (required): Path to environment config file
+- `hyperparameters` (optional): Global-level generation parameters (lowest priority)
+- `models` (required): Array of model specifications
+  - `name` (required): Model name from environment config
+  - `hyperparameters` (optional): Model-level overrides (highest priority)
+  - `quantization_config` (optional): Quantization settings for model loading
+- `assessments` (required): Array of assessment specifications
+  - `config` (required): Assessment config filename
+  - `hyperparameters` (optional): Assessment-level overrides (middle priority)
 - `outdir` (optional): Output directory name (default: `evaluation_results`)
+
+**Hyperparameter Priority:** Model > Assessment > Global
 
 #### Metrics-Only Pipeline
 
@@ -94,6 +164,7 @@ The metrics-only pipeline has two ways to specify inference results:
 ```json
 {
     "pipeline_type": "metrics_only",
+    "environment_config": "test_env.json",
     "metrics": ["MMLU_Accuracy", "ROUGE_Score"],
     "inference_results": [
         "/absolute/path/to/inference_result_1.json",
@@ -107,6 +178,7 @@ The metrics-only pipeline has two ways to specify inference results:
 ```json
 {
     "pipeline_type": "metrics_only",
+    "environment_config": "test_env.json",
     "metrics": ["MMLU_Accuracy"],
     "inference_results": {
         "type": "from_evaluation_report",
@@ -122,6 +194,7 @@ The metrics-only pipeline has two ways to specify inference results:
 
 **Fields:**
 - `pipeline_type` (required): Must be `"metrics_only"`
+- `environment_config` (required): Path to environment config file
 - `metrics` (required): Array of metric names to calculate
 - `inference_results` (required): Either:
   - Array of file paths (absolute paths to inference result JSON files)
@@ -156,8 +229,8 @@ Assessment configs define a set of prompts and the metrics to calculate on their
 {
     "name": "assessment_identifier",
     "prompts": [
-        "../inference_engine/prompts/prompt_file_1.json",
-        "../inference_engine/prompts/prompt_file_2.json"
+        "prompt_file_1.json",
+        "prompt_file_2.json"
     ],
     "metrics": ["MMLU_Accuracy", "ROUGE_Score"]
 }
@@ -165,20 +238,9 @@ Assessment configs define a set of prompts and the metrics to calculate on their
 
 **Fields:**
 - `name` (required): Identifier for this assessment (used in results grouping)
-- `prompts` (required): Array of paths to prompt config files
+- `prompts` (required): Array of prompt config filenames
 - `metrics` (required): Array of metric names to calculate
 
-### Path Resolution for Prompts
-
-Prompt file paths in assessment configs are resolved in this order:
-1. Absolute path → use as-is
-2. Relative to current working directory
-3. Relative to `assessment_configs_dir`
-
-**Recommendation:** Use relative paths from the assessment_configs directory:
-```json
-"prompts": ["../inference_engine/prompts/prompt_mmlu_test.json"]
-```
 
 ### Example
 
@@ -186,12 +248,72 @@ Prompt file paths in assessment configs are resolved in this order:
 {
     "name": "mmlu_global_facts_logical_fallacies",
     "prompts": [
-        "../inference_engine/prompts/prompt_mmlu_logical_fallacies_test_few_shot.json",
-        "../inference_engine/prompts/prompt_mmlu_global_facts_test_few_shot.json"
+        "prompt_mmlu_logical_fallacies_test_few_shot.json",
+        "prompt_mmlu_global_facts_test_few_shot.json"
     ],
     "metrics": ["MMLU_Accuracy"]
 }
 ```
+
+---
+
+## Inference Configs
+
+Inference configs are used by the Inference Engine for standalone inference runs (outside of evaluation pipelines).
+
+### Location
+- Default directory: `elm/inference_engine/inference_configs/`
+
+### Schema
+```json
+[
+    {
+        "output_directory": "results/experiment_1",
+        "environment_config": "test_env.json",
+        "hyperparameters": {
+            "temperature": 0.7,
+            "max_new_tokens": 256,
+            "top_p": 0.9
+        },
+        "inference_sets": [
+            {
+                "models": [
+                    {
+                        "name": "LLaMa 3.2 1B",
+                        "hyperparameters": {
+                            "temperature": 0.9
+                        },
+                        "quantization_config": {
+                            "load_in_8bit": true
+                        }
+                    },
+                    {
+                        "name": "LLaMa 3.1 8B Instruct"
+                    }
+                ],
+                "prompts": ["test_prompts.json"],
+                "hyperparameters": {
+                    "top_p": 0.95
+                }
+            }
+        ]
+    }
+]
+```
+
+**Fields:**
+- `output_directory` (required): Directory for inference results
+- `environment_config` (required): Path to environment config file
+- `hyperparameters` (optional): Global-level generation parameters
+- `inference_sets` (required): Array of model/prompt combinations
+  - `models` (required): Array of model specifications
+    - `name` (required): Model name from environment config
+    - `hyperparameters` (optional): Model-level overrides
+    - `quantization_config` (optional): Quantization settings
+  - `prompts` (required): Array of prompt config filenames
+  - `hyperparameters` (optional): Set-level overrides
+
+**Hyperparameter Priority:** Model > Set > Global
 
 ---
 
@@ -218,7 +340,7 @@ Prompt configs contain the actual text prompts sent to language models, along wi
 
 **Fields:**
 - `name` (required): Unique identifier for this prompt
-- `style` (required): Prompt style - one of `"basic"`, `"single_token"`, `"multi_token"`
+- `style` (required): Prompt style. Current support only for `"basic"`
 - `text` (required): The actual prompt text (minimum 1 character)
 - `gt_text` (optional): Ground truth text for comparison metrics (e.g., ROUGE, accuracy)
 
@@ -312,9 +434,9 @@ Use `~` for home directory:
    "assessments": ["assess_mmlu.json"]
    ```
 
-3. **Prompt configs**: Use relative paths from assessment config location
+3. **Prompt configs**: Use simple filenames in assessment config
    ```json
-   "prompts": ["../inference_engine/prompts/my_prompts.json"]
+   "prompts": ["my_prompts.json"]
    ```
 
 4. **Inference results** (metrics-only): Use absolute paths or environment variables
