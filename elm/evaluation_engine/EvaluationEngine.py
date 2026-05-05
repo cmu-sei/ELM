@@ -105,7 +105,7 @@ class Evaluation_Engine:
                 raise ValueError(f"Unknown pipeline type: {pipeline_type}")
 
             execution_time = perf_counter() - start_time
-            evaluation_report["evaluation_metadata"]["total_execution_time"] = execution_time
+            evaluation_report["evaluation_metadata"]["total_execution_time"] = round(execution_time, 1)
 
             report_file = self.save_evaluation_report(evaluation_report, output_dir)
 
@@ -346,7 +346,7 @@ class Evaluation_Engine:
         assessment_result = {
             "name": assessment_config.name,
             "config": getattr(assessment_config, 'config_path', 'unknown'),
-            "execution_time": execution_time,
+            "execution_time": round(execution_time, 1),
             "total_prompts": len(prompt_results),
             "metric_summaries": {
                 name: result.get("summary", {})
@@ -521,7 +521,7 @@ class Evaluation_Engine:
         return {
             "model_name": model_name,
             "total_inference_files": len(model_results),
-            "execution_time": execution_time,
+            "execution_time": round(execution_time, 1),
             "metric_summaries": {
                 name: result.get("summary", {})
                 for name, result in metric_results.items()

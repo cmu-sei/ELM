@@ -217,7 +217,7 @@ class Inference_Engine:
                 {
                     "timestamp": timestamp,
                     "operation": self.current_operation,
-                    "percent": cpu_percent,
+                    "percent": round(cpu_percent, 1),
                 }
             )
 
@@ -225,9 +225,9 @@ class Inference_Engine:
                 {
                     "timestamp": timestamp,
                     "operation": self.current_operation,
-                    "used_gb": ram_used_gb,
-                    "total_gb": ram_total_gb,
-                    "percent": ram_percent,
+                    "used_gb": round(ram_used_gb, 1),
+                    "total_gb": round(ram_total_gb, 1),
+                    "percent": round(ram_percent, 1),
                 }
             )
 
@@ -241,11 +241,11 @@ class Inference_Engine:
                             {
                                 "id": gpu.id,
                                 "name": gpu.name,
-                                "used_vram_gb": gpu.memoryUsed / 1024,
-                                "total_vram_gb": gpu.memoryTotal / 1024,
-                                "vram_percent": (gpu.memoryUsed / gpu.memoryTotal)
-                                * 100,
-                                "gpu_util": gpu.load * 100,  # Convert to percentage
+                                "used_vram_gb": round(gpu.memoryUsed / 1024, 1),
+                                "total_vram_gb": round(gpu.memoryTotal / 1024, 1),
+                                "vram_percent": round((gpu.memoryUsed / gpu.memoryTotal)
+                                * 100, 1),
+                                "gpu_util": round(gpu.load * 100, 1),  # Convert to percentage
                             }
                         )
 
@@ -296,7 +296,7 @@ class Inference_Engine:
             if self.metrics_data["cpu"]:
                 cpu_values = [entry["percent"] for entry in self.metrics_data["cpu"]]
                 metrics_summary["cpu"] = {
-                    "avg_percent": sum(cpu_values) / len(cpu_values),
+                    "avg_percent": round(sum(cpu_values) / len(cpu_values), 1),
                     "max_percent": max(cpu_values),
                     "samples": self.metrics_data["cpu"],
                 }
@@ -305,9 +305,9 @@ class Inference_Engine:
                 ram_percent = [entry["percent"] for entry in self.metrics_data["ram"]]
                 ram_used_gb = [entry["used_gb"] for entry in self.metrics_data["ram"]]
                 metrics_summary["ram"] = {
-                    "avg_percent": sum(ram_percent) / len(ram_percent),
+                    "avg_percent": round(sum(ram_percent) / len(ram_percent), 1),
                     "max_percent": max(ram_percent),
-                    "avg_used_gb": sum(ram_used_gb) / len(ram_used_gb),
+                    "avg_used_gb": round(sum(ram_used_gb) / len(ram_used_gb), 1),
                     "max_used_gb": max(ram_used_gb),
                     "samples": self.metrics_data["ram"],
                 }
@@ -337,11 +337,11 @@ class Inference_Engine:
 
                     gpu_summary.update(
                         {
-                            "avg_vram_percent": sum(vram_percent) / len(vram_percent),
+                            "avg_vram_percent": round(sum(vram_percent) / len(vram_percent), 1),
                             "max_vram_percent": max(vram_percent),
-                            "avg_used_vram_gb": sum(vram_used) / len(vram_used),
+                            "avg_used_vram_gb": round(sum(vram_used) / len(vram_used), 1),
                             "max_used_vram_gb": max(vram_used),
-                            "avg_gpu_util": sum(gpu_util) / len(gpu_util),
+                            "avg_gpu_util": round(sum(gpu_util) / len(gpu_util), 1),
                             "max_gpu_util": max(gpu_util),
                             "samples": [
                                 {
@@ -604,7 +604,7 @@ class Inference_Engine:
                     # Log load time and metrics
                     inference_log.update_log(
                         {
-                            "load_time": load_time,
+                            "load_time": round(load_time, 1),
                             "num_previous_prompts": executed_prompts,
                             "hardware_metrics": {
                                 "load": self.current_model_loading_metrics
@@ -626,7 +626,7 @@ class Inference_Engine:
                             "generation_config": generation_config,
                             "quantization_config": used_quant_config,
                             "inference_results": result,
-                            "inference_time": inference_time,
+                            "inference_time": round(inference_time, 1),
                             "hardware_metrics": {"inference": inference_metrics},
                         }
                     )
