@@ -655,7 +655,7 @@ class Evaluation_Engine:
             klass_list = metrics.__all__
             for klass in klass_list:
                 try:
-                    module = import_module("metrics." + klass)
+                    module = import_module("elm.evaluation_engine.metrics." + klass)
                     metric = module.Metric()
                     self.available_metrics[metric.name] = metric
                 except Exception as e:
