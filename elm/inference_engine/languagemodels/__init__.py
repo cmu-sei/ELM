@@ -25,9 +25,11 @@
 from . import Llama
 from . import T5
 from . import OpenAI
+from . import Ollama
 
 __all__ = [
     "Llama",
     "T5",
-    "OpenAI"
+    "OpenAI",
+    "Ollama"
 ]
